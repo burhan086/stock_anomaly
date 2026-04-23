@@ -1,11 +1,16 @@
-# streamlit_app.py
-# Stock Market Anomaly Detection Dashboard
-# Student: Burhanuddin Udaipurwala
-
 import streamlit as st
 import numpy as np
 import pandas as pd
-import yfinance as yf
+
+# Try importing yfinance, install if missing
+try:
+    import yfinance as yf
+except ImportError:
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance"])
+    import yfinance as yf
+
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from sklearn.preprocessing import StandardScaler
@@ -151,12 +156,24 @@ def detect_anomalies(df, ret_thresh, vol_thresh, range_thresh):
 
 def compute_market_metrics(df):
     """Market-level aggregation"""
-    market = df.groupby(level=0).agg({
+    # Group by date and calculate metrics
+    market = df.groupby(df.index).agg({
         'Return': 'mean',
         'anomaly_flag': 'mean'
-    }).rename(columns={'Return': 'market_ret', 'anomaly_flag': 'flag_rate'})
+    })
+    market.columns = ['market_ret', 'flag_rate']
     
-    market['breadth'] = df.groupby(level=0).apply(lambda x: (x['Return'] > 0).sum() / len(x))
+    # Calculate breadth separately
+    breadth_data = []
+    for date in df.index.unique():
+        day_data = df.loc[date]
+        breadth = (day_data['Return'] > 0).sum() / len(day_data) if len(day_data) > 0 else 0
+        breadth_data.append({'Date': date, 'breadth': breadth})
+    
+    breadth_df = pd.DataFrame(breadth_data).set_index('Date')
+    market = market.join(breadth_df)
+    
+    # Market anomaly flag
     market['market_anomaly_flag'] = (
         (market['market_ret'].abs() > market['market_ret'].abs().quantile(0.95)) |
         (market['breadth'] < 0.3)
