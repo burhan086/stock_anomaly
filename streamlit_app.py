@@ -172,19 +172,37 @@ if run_analysis and len(selected_stocks) > 0:
                                        min_value=test.index.min().date(), max_value=test.index.max().date())
             
             q_str = str(query_date)
+            
+            # Check if date exists in our analyzed data
             if q_str in market.index.astype(str):
                 m = market.loc[q_str]
+                
+                # Market Status Display
                 if m['market_anomaly_flag']:
                     st.markdown(f'<div class="anomaly-alert">🚨 MARKET ANOMALY: Return {m["market_ret"]*100:.2f}%, Breadth {m["breadth"]*100:.0f}%</div>', unsafe_allow_html=True)
                 else:
-                    st.info(f"Market Status: Normal | Return: {m['market_ret']*100:.2f}%")
+                    st.info(f"✅ Market Status: Normal | Return: {m['market_ret']*100:.2f}% | Breadth: {m['breadth']*100:.0f}%")
                 
-                day_anoms = test.loc[q_str]
-                day_anoms = day_anoms[day_anoms['anomaly_flag'] == 1]
+               
+                # We use a boolean mask to ensure we ALWAYS get a DataFrame, even for 1 stock
+                day_data = test[test.index.astype(str) == q_str]
+                
+                # Filter for only anomalous stocks on that day
+                day_anoms = day_data[day_data['anomaly_flag'] == 1]
+                
                 if not day_anoms.empty:
-                    st.dataframe(day_anoms[['Ticker', 'type', 'Return', 'ret_z', 'volz']])
+                    st.subheader(f"Flagged Stocks ({len(day_anoms)})")
+                    # Displaying specific columns for clarity
+                    st.dataframe(day_anoms[['Ticker', 'type', 'Return', 'ret_z', 'volz']].style.format({
+                        'Return': '{:.2%}',
+                        'ret_z': '{:.2f}',
+                        'volz': '{:.2f}'
+                    }))
                 else:
-                    st.write("No individual stock anomalies on this date.")
+                    st.success("No individual stock anomalies detected on this date.")
+               
+                else:
+                    st.warning("No trading data available for the selected date (it might be a weekend or holiday).")
 
             # 3. CHARTS
             st.header("📈 Interactive Visualization")
@@ -208,4 +226,4 @@ if run_analysis and len(selected_stocks) > 0:
 else:
     st.info("👈 Select stocks and click 'Run Analysis' in the sidebar.")
 
-st.caption("Capstone Project | Burhanuddin Udaipurwala")
+st.caption("Burhanuddin Udaipurwala")
