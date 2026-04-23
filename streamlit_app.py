@@ -4,11 +4,10 @@ import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from sklearn.preprocessing import StandardScaler
 from datetime import datetime
 import warnings
 
-# Ignore warnings for a cleaner dashboard
+# Ignore warnings
 warnings.filterwarnings('ignore')
 
 # ============================================================================
@@ -25,7 +24,8 @@ st.set_page_config(
 st.markdown("""
 <style>
     .main-header { font-size: 2.5rem; font-weight: bold; color: #1f77b4; text-align: center; margin-bottom: 1rem; }
-    .anomaly-alert { background-color: #ffebee; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #f44336; color: #b71c1c; }
+    .anomaly-alert { background-color: #ffebee; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #f44336; color: #b71c1c; margin: 10px 0; }
+    .normal-info { background-color: #e8f5e9; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #4caf50; color: #1b5e20; margin: 10px 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -57,6 +57,12 @@ with st.sidebar:
     range_threshold = st.slider("Range Percentile Threshold", 90, 99, 95, 1)
     
     run_analysis = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
+    
+    if st.button("🗑️ Clear Cache", use_container_width=True):
+        st.session_state.test_df = None
+        st.session_state.market_df = None
+        st.rerun()
+
     st.divider()
     st.caption("💡 Tip: Lower thresholds = more sensitive detection")
 
@@ -70,10 +76,8 @@ def fetch_data(tickers, start, end):
     for t in tickers:
         df = yf.download(t, start=start, end=end, progress=False)
         if df.empty: continue
-        # Handle multi-index columns if yfinance returns them
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-        # Fix for newer yfinance versions where Adj Close might be missing
         if 'Adj Close' not in df.columns:
             df['Adj Close'] = df['Close']
         data[t] = df[['Open','High','Low','Close','Adj Close','Volume']]
@@ -84,7 +88,7 @@ def create_features(df, ticker):
     df['Return'] = df['Adj Close'].pct_change()
     df['LogVol'] = np.log(df['Volume'].replace(0, 1))
     
-    # Z-scores based on rolling windows
+    # Rolling Z-scores (Standardizing relative to history)
     ret_mean = df['Return'].shift(1).rolling(63).mean()
     ret_std = df['Return'].shift(1).rolling(63).std()
     df['ret_z'] = (df['Return'] - ret_mean) / ret_std
@@ -120,21 +124,17 @@ def detect_anomalies(df, ret_thresh, vol_thresh, range_thresh):
     return df
 
 def compute_market_metrics(df):
-    """Aggregates data to market-level. Fixed for single-stock stability."""
-    # Group by Date (index level 0)
+    """Aggregates data to market-level. Robust for single-stock stability."""
     market = df.groupby(level=0).agg({
         'Return': 'mean',
         'anomaly_flag': 'mean'
     }).rename(columns={'Return': 'market_ret', 'anomaly_flag': 'flag_rate'})
     
-    # Calculate Breadth (percentage of stocks that were positive today)
-    # Using a robust method that works for 1 or many stocks
+    # Breadth: Percentage of stocks moving up
     market['breadth'] = df['Return'].gt(0).groupby(level=0).mean()
     
-    # Market anomaly logic
-    # Use 95th percentile if enough data, else default to 5% move
+    # Threshold for market stress
     thresh = market['market_ret'].abs().quantile(0.95) if len(market) > 20 else 0.05
-    
     market['market_anomaly_flag'] = (
         (market['market_ret'].abs() > thresh) | (market['breadth'] < 0.3)
     ).astype(int)
@@ -142,88 +142,144 @@ def compute_market_metrics(df):
     return market
 
 # ============================================================================
-# MAIN APP LOGIC
+# SESSION STATE MANAGEMENT (Prevents Page Resets)
+# ============================================================================
+if 'test_df' not in st.session_state:
+    st.session_state.test_df = None
+if 'market_df' not in st.session_state:
+    st.session_state.market_df = None
+
+# ============================================================================
+# EXECUTION LOGIC
 # ============================================================================
 
+# When button is clicked
 if run_analysis and len(selected_stocks) > 0:
-    with st.spinner("Processing Market Data..."):
-        data_map = fetch_data(selected_stocks, start_date, end_date)
+    with st.spinner("🚀 Analyzing Market Data..."):
+        raw_data = fetch_data(selected_stocks, start_date, end_date)
         
-        if not data_map:
-            st.error("No data found for the selected tickers/dates.")
+        if not raw_data:
+            st.error("❌ No data found. Please check your stock symbols or dates.")
         else:
-            all_df = pd.concat([create_features(data_map[t], t) for t in data_map]).sort_index()
-            test = all_df.copy()
-            test = detect_anomalies(test, ret_threshold, vol_threshold, range_threshold)
-            market = compute_market_metrics(test)
+            # Feature Engineering
+            processed_list = [create_features(raw_data[t], t) for t in raw_data]
+            all_df = pd.concat(processed_list).sort_index()
             
-            st.success("Analysis Complete!")
-
-            # 1. OVERVIEW METRICS
-            col1, col2, col3, col4 = st.columns(4)
-            with col1: st.metric("Trading Days", f"{len(test.index.unique())}")
-            with col2: st.metric("Anomalies", f"{test['anomaly_flag'].sum()}", f"{test['anomaly_flag'].mean()*100:.1f}%")
-            with col3: st.metric("Market Stress Days", f"{market['market_anomaly_flag'].sum()}")
-            with col4: st.metric("Avg Breadth", f"{market['breadth'].mean()*100:.1f}%")
-
-            # 2. DATE QUERY
-            st.header("🔍 Date Query Tool")
-            query_date = st.date_input("Pick a date", value=test.index.max().date(), 
-                                       min_value=test.index.min().date(), max_value=test.index.max().date())
+            # Detection
+            test_results = detect_anomalies(all_df, ret_threshold, vol_threshold, range_threshold)
+            market_results = compute_market_metrics(test_results)
             
-            q_str = str(query_date)
-            
-            # Check if date exists in our analyzed data
-            if q_str in market.index.astype(str):
-                m = market.loc[q_str]
-                
-                # Market Status Display
-                if m['market_anomaly_flag']:
-                    st.markdown(f'<div class="anomaly-alert">🚨 MARKET ANOMALY: Return {m["market_ret"]*100:.2f}%, Breadth {m["breadth"]*100:.0f}%</div>', unsafe_allow_html=True)
-                else:
-                    st.info(f"✅ Market Status: Normal | Return: {m['market_ret']*100:.2f}% | Breadth: {m['breadth']*100:.0f}%")
-                
-               
-                # We use a boolean mask to ensure we ALWAYS get a DataFrame, even for 1 stock
-                day_data = test[test.index.astype(str) == q_str]
-                
-                # Filter for only anomalous stocks on that day
-                day_anoms = day_data[day_data['anomaly_flag'] == 1]
-                
-                if not day_anoms.empty:
-                    st.subheader(f"Flagged Stocks ({len(day_anoms)})")
-                    # Displaying specific columns for clarity
-                    st.dataframe(day_anoms[['Ticker', 'type', 'Return', 'ret_z', 'volz']].style.format({
-                        'Return': '{:.2%}',
-                        'ret_z': '{:.2f}',
-                        'volz': '{:.2f}'
-                    }))
-                else:
-                    st.success("No individual stock anomalies detected on this date.")
-               
-            else:
-                st.warning("No trading data available for the selected date (it might be a weekend or holiday).")
+            # Store in session state
+            st.session_state.test_df = test_results
+            st.session_state.market_df = market_results
+            st.success("✅ Analysis Complete!")
 
-            # 3. CHARTS
-            st.header("📈 Interactive Visualization")
-            chart_stock = st.selectbox("Select stock", selected_stocks)
-            s_data = test[test['Ticker'] == chart_stock]
-            s_anoms = s_data[s_data['anomaly_flag'] == 1]
+# DISPLAY DASHBOARD IF DATA EXISTS
+if st.session_state.test_df is not None:
+    test = st.session_state.test_df
+    market = st.session_state.market_df
 
-            fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.5, 0.25, 0.25])
-            fig.add_trace(go.Scatter(x=s_data.index, y=s_data['Price'], name='Price'), row=1, col=1)
-            fig.add_trace(go.Scatter(x=s_anoms.index, y=s_anoms['Price'], mode='markers', name='Anomaly', marker=dict(color='red', size=8)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=s_data.index, y=s_data['ret_z'], name='Ret Z-Score'), row=2, col=1)
-            fig.add_trace(go.Scatter(x=market.index, y=market['breadth'], name='Market Breadth', fill='tozeroy'), row=3, col=1)
-            fig.update_layout(height=800, template='plotly_white')
-            st.plotly_chart(fig, use_container_width=True)
+    # 1. OVERVIEW METRICS
+    st.header("📊 Market Overview")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1: st.metric("Total Trading Days", f"{len(test.index.unique())}")
+    with col2: st.metric("Total Anomalies", f"{test['anomaly_flag'].sum()}", f"{test['anomaly_flag'].mean()*100:.1f}% rate")
+    with col3: st.metric("Market Stress Days", f"{market['market_anomaly_flag'].sum()}")
+    with col4: st.metric("Avg Market Breadth", f"{market['breadth'].mean()*100:.1f}%")
+    st.divider()
 
-            # 4. DOWNLOAD DATA
-            st.header("📋 Download Report")
-            csv = test[test['anomaly_flag']==1].to_csv().encode('utf-8')
-            st.download_button("Download Anomalies CSV", csv, "anomalies.csv", "text/csv")
+    # 2. DATE QUERY TOOL (Robust Fix)
+    st.header("🔍 Date Query Tool")
+    query_date = st.date_input("Select a date to investigate", 
+                               value=test.index.max().date(), 
+                               min_value=test.index.min().date(), 
+                               max_value=test.index.max().date())
+    
+    q_str = str(query_date)
+    if q_str in market.index.astype(str):
+        m = market.loc[q_str]
+        
+        if m['market_anomaly_flag']:
+            st.markdown(f'<div class="anomaly-alert">🚨 <b>MARKET ANOMALY DETECTED</b><br>Market Return: {m["market_ret"]*100:.2f}% | Breadth: {m["breadth"]*100:.0f}%</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="normal-info">✅ <b>MARKET STATUS: NORMAL</b><br>Market Return: {m["market_ret"]*100:.2f}% | Breadth: {m["breadth"]*100:.0f}%</div>', unsafe_allow_html=True)
+        
+        # Safe dataframe extraction for single or multiple stocks
+        day_data = test[test.index.astype(str) == q_str]
+        day_anoms = day_data[day_data['anomaly_flag'] == 1]
+        
+        if not day_anoms.empty:
+            st.subheader(f"Flagged Stocks ({len(day_anoms)})")
+            st.dataframe(day_anoms[['Ticker', 'type', 'Return', 'ret_z', 'volz']].style.format({
+                'Return': '{:.2%}',
+                'ret_z': '{:.2f}',
+                'volz': '{:.2f}'
+            }), use_container_width=True)
+        else:
+            st.success("No individual stock anomalies detected on this date.")
+    else:
+        st.warning("⚠️ No trading data available for this date (Market Holiday/Weekend).")
+    
+    st.divider()
+
+    # 3. INTERACTIVE VISUALIZATION
+    st.header("📈 Interactive Visualization")
+    chart_stock = st.selectbox("Select a stock to visualize", selected_stocks)
+    
+    s_data = test[test['Ticker'] == chart_stock]
+    s_anoms = s_data[s_data['anomaly_flag'] == 1]
+
+    fig = make_subplots(
+        rows=3, cols=1, 
+        shared_xaxes=True, 
+        vertical_spacing=0.05, 
+        row_heights=[0.5, 0.25, 0.25],
+        subplot_titles=(f'{chart_stock} Price & Anomalies', 'Z-Score Indicators', 'Market Breadth')
+    )
+
+    # Price Panel
+    fig.add_trace(go.Scatter(x=s_data.index, y=s_data['Price'], name='Price', line=dict(color='#1f77b4')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=s_anoms.index, y=s_anoms['Price'], mode='markers', name='Anomaly', marker=dict(color='red', size=10, symbol='x')), row=1, col=1)
+
+    # Indicators Panel
+    fig.add_trace(go.Scatter(x=s_data.index, y=s_data['ret_z'], name='Return Z', line=dict(color='green')), row=2, col=1)
+    fig.add_trace(go.Scatter(x=s_data.index, y=s_data['volz'], name='Volume Z', line=dict(color='orange')), row=2, col=1)
+    fig.add_hline(y=ret_threshold, line_dash="dash", line_color="red", row=2, col=1)
+    fig.add_hline(y=-ret_threshold, line_dash="dash", line_color="red", row=2, col=1)
+
+    # Breadth Panel
+    fig.add_trace(go.Scatter(x=market.index, y=market['breadth'], name='Breadth', fill='tozeroy', line=dict(color='purple')), row=3, col=1)
+    fig.add_hline(y=0.3, line_dash="dash", line_color="red", row=3, col=1)
+
+    fig.update_layout(height=800, template='plotly_white', hovermode='x unified')
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 4. DOWNLOAD DATA
+    st.header("📋 Export Results")
+    full_anomalies = test[test['anomaly_flag'] == 1].copy()
+    csv = full_anomalies.to_csv().encode('utf-8')
+    st.download_button(
+        label="📥 Download All Anomalies as CSV",
+        data=csv,
+        file_name=f"market_anomalies_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
 
 else:
-    st.info("👈 Select stocks and click 'Run Analysis' in the sidebar.")
+    # Initial Welcome Screen
+    st.info("👈 Use the sidebar to select your stocks and click 'Run Analysis' to see the results.")
+    st.markdown("""
+    ### About this Project
+    This dashboard identifies **Stock Market Anomalies** using statistical thresholds:
+    *   **Price Shocks:** Movements exceeding the chosen Z-Score.
+    *   **Volume Shocks:** Log-volume spikes relative to the 21-day average.
+    *   **Volatility:** Intraday range percentiles.
+    *   **Market Breadth:** Identifying if anomalies are isolated or market-wide.
+    """)
 
-st.caption("Burhanuddin Udaipurwala")
+# ============================================================================
+# FOOTER
+# ============================================================================
+st.divider()
+st.caption("📈 Stock Market Anomaly Detector | Burhanuddin Udaipurwala")
