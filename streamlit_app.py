@@ -201,8 +201,8 @@ if run_analysis and len(selected_stocks) > 0:
                 else:
                     st.success("No individual stock anomalies detected on this date.")
                
-                else:
-                    st.warning("No trading data available for the selected date (it might be a weekend or holiday).")
+            else:
+                st.warning("No trading data available for the selected date (it might be a weekend or holiday).")
 
             # 3. CHARTS
             st.header("📈 Interactive Visualization")
