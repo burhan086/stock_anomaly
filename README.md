@@ -1,5 +1,13 @@
-# 📈 Stock Market Anomaly Detector 
+[![Live Demo](https://static.streamlit.io/badges/streamlit_badge_svg?style=flat)](https://burhan-stock-anomaly.streamlit.app/)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+---
+
+## 🔗 Live Demo
+**Access the interactive dashboard here:** [https://burhan-stock-anomaly.streamlit.app/](https://burhan-stock-anomaly.streamlit.app/)
+
+---
 
 ## 📝 Project Overview
 The **Stock Market Anomaly Detector** is an interactive financial dashboard designed to identify "Black Swan" events and unusual trading behavior in historical and real-time stock data. By utilizing statistical Z-scores and market breadth indicators, the tool distinguishes between isolated stock volatility and systemic market stress.
