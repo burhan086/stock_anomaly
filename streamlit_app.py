@@ -156,22 +156,22 @@ def detect_anomalies(df, ret_thresh, vol_thresh, range_thresh):
 
 def compute_market_metrics(df):
     """Market-level aggregation"""
-    # Group by date and calculate metrics
-    market = df.groupby(df.index).agg({
+    # Reset index to work with dates as column
+    df_reset = df.reset_index()
+    df_reset.columns = ['Date'] + list(df.columns)
+    
+    # Group by date
+    market = df_reset.groupby('Date').agg({
         'Return': 'mean',
         'anomaly_flag': 'mean'
     })
     market.columns = ['market_ret', 'flag_rate']
     
-    # Calculate breadth separately
-    breadth_data = []
-    for date in df.index.unique():
-        day_data = df.loc[date]
-        breadth = (day_data['Return'] > 0).sum() / len(day_data) if len(day_data) > 0 else 0
-        breadth_data.append({'Date': date, 'breadth': breadth})
-    
-    breadth_df = pd.DataFrame(breadth_data).set_index('Date')
-    market = market.join(breadth_df)
+    # Calculate breadth
+    breadth = df_reset.groupby('Date').apply(
+        lambda x: (x['Return'] > 0).sum() / len(x)
+    )
+    market['breadth'] = breadth
     
     # Market anomaly flag
     market['market_anomaly_flag'] = (
