@@ -1,9 +1,3 @@
-[![Live Demo](https://static.streamlit.io/badges/streamlit_badge_svg?style=flat)](https://burhan-stock-anomaly.streamlit.app/)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
----
-
 ## 🔗 Live Demo
 **Access the interactive dashboard here:** [https://burhan-stock-anomaly.streamlit.app/](https://burhan-stock-anomaly.streamlit.app/)
 
