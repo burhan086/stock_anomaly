@@ -1,5 +1,5 @@
 ## 🔗 Live Demo
-**Access the interactive dashboard here:* [https://burhan-stock-anomaly.streamlit.app/](https://burhan-stock-anomaly.streamlit.app/)
+**Access the interactive dashboard here:** [https://burhan-stock-anomaly.streamlit.app/](https://burhan-stock-anomaly.streamlit.app/)
 
 ---
 
