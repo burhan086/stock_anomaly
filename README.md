@@ -3,7 +3,7 @@
 
 ---
 
-## 📝 Project Overview
+ 📝 Project Overview
 The **Stock Market Anomaly Detector** is an interactive financial dashboard designed to identify "Black Swan" events and unusual trading behavior in historical and real-time stock data. By utilizing statistical Z-scores and market breadth indicators, the tool distinguishes between isolated stock volatility and systemic market stress.
 
 This project demonstrates the application of **Unsupervised Learning** concepts and **Statistical Process Control** to financial time-series data.
